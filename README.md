@@ -79,10 +79,14 @@ Three tabs — **Papers**, **Articles**, **Profiles**:
 
 | Tab | Columns |
 | --- | --- |
-| `Papers` | `type, title, venue, date, note, note_url, logo, blurb, authors, pdf_url, tags, hidden` |
+| `Papers` | `slug, type, title, venue, date, note, note_url, logo, blurb, authors, pdf_url, tags, hidden` |
 | `Articles` | `column, title, meta, url, hidden` |
 | `Profiles` | `name, role, photo, link_label, link_url, hidden` |
 
+- **`slug`** is what joins a row to its paper page — it must match the folder name
+  under `research/papers/`. Leave it blank and the page falls back to deriving a slug
+  from the title, which is fine until someone rewords the title: the link then breaks
+  silently. Fill it in for any paper that has a page.
 - **`tags`** drives the filter chips — comma-separated, e.g. `Culture, India`. A new tag
   automatically becomes a new chip (sorted alphabetically after `All`).
 - **`hidden`** — put `yes` to pull a row off the page without deleting it.
@@ -128,7 +132,7 @@ python3 scripts/build_papers.py
 ```
 
 - The text lives in [`scripts/papers_content.py`](scripts/papers_content.py), one entry
-  per paper. Edit there and re-run — never edit `research/<slug>.html` by hand, it is
+  per paper. Edit there and re-run — never edit `research/papers/<slug>/index.html` by hand, it is
   overwritten.
 - `listed_as` in each entry must match the paper's `title` in the Sheet **exactly**.
   That is the join between a row in the list and its page.

@@ -34,13 +34,19 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 PAGE = ROOT / "research" / "index.html"
 DATA_DIR = ROOT / "research" / "data"
 
-# tab name -> (json key, required columns)
+# tab name -> (json key, required columns, optional columns)
+#
+# `slug` is what joins a Papers row to its built page. It is optional: when the
+# cell is blank the page falls back to deriving a slug from the title, which is
+# how this worked before the column existed. Fill it in and the title becomes
+# free to change without breaking the link.
 TABS = {
     "Papers": ("papers", ["type", "title", "venue", "date", "note", "note_url",
-                          "logo", "blurb", "authors", "pdf_url", "tags", "hidden"]),
-    "Articles": ("articles", ["column", "title", "meta", "url", "hidden"]),
+                          "logo", "blurb", "authors", "pdf_url", "tags", "hidden"],
+               ["slug"]),
+    "Articles": ("articles", ["column", "title", "meta", "url", "hidden"], []),
     "Profiles": ("profiles", ["name", "role", "photo", "link_label",
-                              "link_url", "hidden"]),
+                              "link_url", "hidden"], []),
 }
 
 ISLAND_RE = re.compile(
@@ -129,12 +135,18 @@ def main() -> int:
     all_warnings: list[str] = []
 
     print(f"Sheet {SHEET_ID}")
-    for tab, (key, required) in TABS.items():
+    for tab, (key, required, optional) in TABS.items():
         rows = rows_from_csv(fetch_tab(tab), tab, required)
+        present = [c for c in optional if any(c in r for r in rows)]
+        missing_optional = [c for c in optional if c not in present]
+        for r in rows:
+            for c in optional:
+                r.setdefault(c, "")
         payload[key] = rows
-        csv_text[tab] = write_csv(DATA_DIR / f"{tab}.csv", rows, required)
+        csv_text[tab] = write_csv(DATA_DIR / f"{tab}.csv", rows, required + present)
         all_warnings += warn_blank_cells(tab, rows)
-        print(f"  {tab:9} {len(rows):3} rows")
+        note = f"  (no {', '.join(missing_optional)} column yet)" if missing_optional else ""
+        print(f"  {tab:9} {len(rows):3} rows{note}")
 
     if all_warnings:
         print("\nWARNING: empty cells that probably should have content:")

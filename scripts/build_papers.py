@@ -64,6 +64,11 @@ def slug_id(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
+def slugify(title: str) -> str:
+    """Must stay in step with slugify() in research/index.html."""
+    return slug_id(title.replace("&", " and "))
+
+
 # --------------------------------------------------------------------------- #
 # blocks
 # --------------------------------------------------------------------------- #
@@ -683,10 +688,20 @@ def main() -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "index.html").write_text(build_page(paper))
         written.append(f"papers/{slug}/index.html")
-        manifest[paper["listed_as"]] = {
+        # keyed on slug — the Sheet's `slug` column, or a slug derived from the
+        # title when that cell is blank. Titles can then be reworded freely.
+        manifest[slug] = {
             "page": f"papers/{slug}/",
             "pdf": f"pdf/{slug}.pdf",
         }
+        derived = slugify(paper["listed_as"])
+        if derived != slug:
+            raise SystemExit(
+                f"ERROR: {slug!r} does not match the slug derived from its "
+                f"listed_as title ({derived!r}).\n"
+                "  Either rename the slug, or put the slug in the Sheet's "
+                "`slug` column for that row."
+            )
 
     page = INDEX.read_text()
     if not MANIFEST_RE.search(page):
