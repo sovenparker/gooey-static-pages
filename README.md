@@ -80,7 +80,7 @@ Three tabs — **Papers**, **Articles**, **Profiles**:
 | Tab | Columns |
 | --- | --- |
 | `Papers` | `slug, type, title, venue, date, note, note_url, logo, blurb, authors, pdf_url, tags, hidden` |
-| `Articles` | `column, title, meta, url, hidden` |
+| `Articles` | `column, title, meta, url, hidden` — but see below: the Medium and Gooey Blog columns are pulled from feeds, not the Sheet |
 | `Profiles` | `name, role, photo, link_label, link_url, hidden` |
 
 - **`slug`** is what joins a row to its paper page — it must match the folder name
@@ -99,6 +99,29 @@ Three tabs — **Papers**, **Articles**, **Profiles**:
   then returns **empty** for cells in that column that don't match the inferred type — a
   `date` column holding both `16 April` and `25–27 November` silently drops the second.
   The sync script warns when it sees a suspicious blank.
+
+#### Featured Articles come from feeds
+
+Two of the three Featured Articles columns are pulled live at sync time, so they do
+not need Sheet rows at all:
+
+| Column | Source |
+| --- | --- |
+| `Medium` | `https://medium.com/feed/@seanb` (RSS) |
+| `Gooey Blog` | `https://blog.gooey.ai/llms.txt`, dated from the post description |
+| `Events & Press` | the Sheet — there is no feed for these |
+
+The newest three of each are used. Change the sources or the count in the `FEEDS`
+dict at the top of `scripts/sync_research.py`.
+
+**If a feed cannot be reached** the sync falls back to whatever the Sheet holds for
+that column and prints a warning, so a network blip degrades to the old behaviour
+rather than emptying a card. Medium in particular rate-limits and will occasionally
+fail; re-run the sync. Each run reports its source, e.g.
+`Articles 9 rows [Gooey Blog from feed (3), Medium from feed (3)]`.
+
+Because of that fallback, leaving stale Medium or Gooey Blog rows in the Sheet is a
+trap: they reappear the moment a fetch fails. Delete them.
 
 ### 2. Run the sync
 

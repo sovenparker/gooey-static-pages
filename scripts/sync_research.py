@@ -26,9 +26,31 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from datetime import datetime, timezone
 
 SHEET_ID = "1sk_HB3sJgYer0shLibe8MvNRmRmdPzWE48U_GxXmIxY"
+
+# Articles columns that are pulled from a feed instead of the Sheet. Rows for
+# these columns in the Articles tab are ignored — delete them, they are noise.
+# If a feed cannot be reached the Sheet's rows for that column are used instead,
+# so a network blip degrades to the old behaviour rather than emptying a card.
+FEEDS = {
+    "Gooey Blog": {
+        "kind": "llmstxt",
+        "url": "https://blog.gooey.ai/llms.txt",
+        # supplies a date per post; llms.txt has titles and links but no dates
+        "dates": "https://blog.gooey.ai/sitemap-pages.xml",
+        # the index entry lists itself; it is not a post
+        "skip": ("gooey.ai-updates-and-blog",),
+        "limit": 3,
+    },
+    "Medium": {
+        "kind": "rss",
+        "url": "https://medium.com/feed/@seanb",
+        "limit": 3,
+    },
+}
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PAGE = ROOT / "research" / "index.html"
@@ -73,6 +95,83 @@ def fetch_tab(tab: str) -> str:
         ) from e
     except urllib.error.URLError as e:
         raise SystemExit(f"ERROR: could not reach Google for tab {tab!r}: {e.reason}") from e
+
+
+def _get(url: str, timeout: int = 30) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": "gooey-static-pages/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def _month_year(iso: str) -> str:
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%a, %d %b %Y %H:%M:%S %Z",
+                "%a, %d %b %Y %H:%M:%S %z"):
+        try:
+            return datetime.strptime(iso, fmt).strftime("%B %Y")
+        except ValueError:
+            continue
+    return ""
+
+
+def fetch_llmstxt(cfg: dict) -> list[dict]:
+    """blog.gooey.ai publishes llms.txt: '- [Title](url.md): description',
+    newest first. Dates come from the sitemap."""
+    entries = []
+    for line in _get(cfg["url"]).splitlines():
+        m = re.match(r"\s*-\s*\[(.+?)\]\((https?://[^)\s]+)\)\s*(?::\s*(.*))?$", line)
+        if not m:
+            continue
+        title, url, desc = m.group(1).strip(), m.group(2), (m.group(3) or "").strip()
+        url = re.sub(r"\.md$", "", url)
+        if any(sk in url for sk in cfg.get("skip", ())):
+            continue
+        entries.append({"title": title, "url": url, "desc": desc})
+
+    dates = {}
+    if cfg.get("dates"):
+        try:
+            xml = _get(cfg["dates"])
+            for loc, mod in re.findall(r"<loc>(.*?)</loc>\s*(?:<priority>.*?</priority>\s*)?"
+                                       r"<lastmod>(.*?)</lastmod>", xml, re.S):
+                dates[loc.strip()] = _month_year(mod.strip())
+        except Exception:
+            pass
+
+    out = []
+    for e in entries[: cfg["limit"]]:
+        # the description carries the real period ("Product Updates August
+        # 2026"); the sitemap only knows when a post was last touched
+        out.append({"title": e["title"], "url": e["url"],
+                    "meta": e["desc"] or dates.get(e["url"], ""), "hidden": ""})
+    return out
+
+
+def fetch_rss(cfg: dict) -> list[dict]:
+    xml = _get(cfg["url"])
+    out = []
+    for item in re.findall(r"<item>(.*?)</item>", xml, re.S)[: cfg["limit"]]:
+        def tag(name):
+            m = re.search(rf"<{name}>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</{name}>", item, re.S)
+            return (m.group(1).strip() if m else "")
+        title, link = tag("title"), tag("link")
+        if not (title and link):
+            continue
+        out.append({"title": title, "url": link,
+                    "meta": _month_year(tag("pubDate")), "hidden": ""})
+    return out
+
+
+def fetch_feed(column: str, cfg: dict) -> tuple[list[dict], str]:
+    """Returns (rows, error). On error the caller keeps the Sheet's rows."""
+    try:
+        rows = {"llmstxt": fetch_llmstxt, "rss": fetch_rss}[cfg["kind"]](cfg)
+    except Exception as e:  # network, parse, anything
+        return [], f"{type(e).__name__}: {e}"
+    if not rows:
+        return [], "feed had no usable entries"
+    for r in rows:
+        r["column"] = column
+    return rows, ""
 
 
 def rows_from_csv(text: str, tab: str, required: list[str]) -> list[dict]:
@@ -120,6 +219,39 @@ def write_csv(path: pathlib.Path, rows: list[dict], header: list[str]) -> str:
     return buf.getvalue()
 
 
+def merge_feeds(sheet_rows: list[dict], warnings: list[str]) -> tuple[list[dict], str]:
+    """Replace the feed-backed columns with live entries, keeping the Sheet's
+    column order. Sheet rows for a feed column are dropped — unless the feed
+    could not be fetched, in which case they are kept as a fallback."""
+    order, seen = [], set()
+    for r in sheet_rows:
+        c = r.get("column", "")
+        if c not in seen:
+            seen.add(c)
+            order.append(c)
+    for c in FEEDS:
+        if c not in seen:
+            order.append(c)
+
+    fetched, notes = {}, []
+    for column, cfg in FEEDS.items():
+        rows, err = fetch_feed(column, cfg)
+        if err:
+            warnings.append(f"  {column}: feed unavailable ({err}) — kept the Sheet's rows")
+            notes.append(f"{column} from Sheet")
+        else:
+            fetched[column] = rows
+            notes.append(f"{column} from feed ({len(rows)})")
+
+    out = []
+    for column in order:
+        if column in fetched:
+            out += fetched[column]
+        else:
+            out += [r for r in sheet_rows if r.get("column") == column]
+    return out, "  [" + ", ".join(notes) + "]" if notes else ""
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -142,10 +274,15 @@ def main() -> int:
         for r in rows:
             for c in optional:
                 r.setdefault(c, "")
+        note = f"  (no {', '.join(missing_optional)} column yet)" if missing_optional else ""
+
+        if tab == "Articles" and FEEDS:
+            rows, feed_note = merge_feeds(rows, all_warnings)
+            note = (note + feed_note) if feed_note else note
+
         payload[key] = rows
         csv_text[tab] = write_csv(DATA_DIR / f"{tab}.csv", rows, required + present)
         all_warnings += warn_blank_cells(tab, rows)
-        note = f"  (no {', '.join(missing_optional)} column yet)" if missing_optional else ""
         print(f"  {tab:9} {len(rows):3} rows{note}")
 
     if all_warnings:
