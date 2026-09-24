@@ -55,7 +55,9 @@ FEEDS = {
     "Medium": {
         "kind": "rss",
         "url": "https://medium.com/feed/@seanb",
-        "limit": 3,
+        # one more than the others: Medium's titles run to a single line, so an
+        # extra item balances the card against the taller two
+        "limit": 4,
     },
 }
 

@@ -566,9 +566,6 @@
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
         gap: clamp(16px, 2vw, 24px);
-        /* cards size to their content — stretching them to a common height
-           left the shortest column half empty */
-        align-items: start;
       }
       .card {
         background: var(--gy-white);
@@ -627,6 +624,13 @@
         font-weight: 500;
         line-height: 140%;
         text-wrap: pretty;
+        /* two lines keeps the cards close in height; a long press headline
+           would otherwise run to three or four */
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
       }
       .card li .meta {
         font-size: 11px;
@@ -952,6 +956,13 @@
 "column": "Medium"
 },
 {
+"title": "Finding Meaning in Video Chat — Why I’ve joined Marco Polo",
+"url": "https://medium.com/@seanb/finding-meaning-in-video-chat-why-ive-joined-marco-polo-1589a60d22ac?source=rss-4fe252eb9cb8------2",
+"meta": "November 2018",
+"hidden": "",
+"column": "Medium"
+},
+{
 "title": "Gooey-Powered Afiya AI Wins AI for Social Impact Initiative Grand Prize 2026",
 "url": "https://blog.gooey.ai/gooey-powered-afiya-ai-wins-ai-for-social-impact-initiative-grand-prize-2026",
 "meta": "September 2026",
@@ -1029,7 +1040,7 @@
 }
 ],
 "_meta": {
-"generatedAt": "2026-09-24T04:31:10Z",
+"generatedAt": "2026-09-24T04:41:41Z",
 "sheetId": "1sk_HB3sJgYer0shLibe8MvNRmRmdPzWE48U_GxXmIxY"
 }
 }
