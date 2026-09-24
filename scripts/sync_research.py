@@ -25,6 +25,7 @@ import re
 import sys
 import urllib.error
 import urllib.parse
+import time
 import urllib.request
 from datetime import datetime
 from datetime import datetime, timezone
@@ -35,6 +36,12 @@ SHEET_ID = "1sk_HB3sJgYer0shLibe8MvNRmRmdPzWE48U_GxXmIxY"
 # these columns in the Articles tab are ignored — delete them, they are noise.
 # If a feed cannot be reached the Sheet's rows for that column are used instead,
 # so a network blip degrades to the old behaviour rather than emptying a card.
+# Left-to-right order of the Featured Articles cards. Anything not listed keeps
+# the order it appears in the Sheet, after these. Without this the order came
+# from whichever columns still had Sheet rows, which flipped once the
+# feed-backed rows were deleted.
+ARTICLE_COLUMN_ORDER = ["Medium", "Gooey Blog", "Events & Press"]
+
 FEEDS = {
     "Gooey Blog": {
         "kind": "llmstxt",
@@ -97,10 +104,27 @@ def fetch_tab(tab: str) -> str:
         raise SystemExit(f"ERROR: could not reach Google for tab {tab!r}: {e.reason}") from e
 
 
-def _get(url: str, timeout: int = 30) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "gooey-static-pages/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8", "replace")
+def _get(url: str, timeout: int = 30, attempts: int = 4) -> str:
+    """Medium rate-limits and resets connections, so retry before giving up."""
+    last = None
+    for n in range(attempts):
+        if n:
+            time.sleep(1.5 * n)
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                  "Chrome/125.0 Safari/537.36",
+                    "Accept": "application/rss+xml, application/xml, text/xml, text/plain, */*",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read().decode("utf-8", "replace")
+        except Exception as e:
+            last = e
+    raise last
 
 
 def _month_year(iso: str) -> str:
@@ -223,14 +247,9 @@ def merge_feeds(sheet_rows: list[dict], warnings: list[str]) -> tuple[list[dict]
     """Replace the feed-backed columns with live entries, keeping the Sheet's
     column order. Sheet rows for a feed column are dropped — unless the feed
     could not be fetched, in which case they are kept as a fallback."""
-    order, seen = [], set()
-    for r in sheet_rows:
-        c = r.get("column", "")
-        if c not in seen:
-            seen.add(c)
-            order.append(c)
-    for c in FEEDS:
-        if c not in seen:
+    order = list(ARTICLE_COLUMN_ORDER)
+    for c in [r.get("column", "") for r in sheet_rows] + list(FEEDS):
+        if c and c not in order:
             order.append(c)
 
     fetched, notes = {}, []
@@ -265,6 +284,7 @@ def main() -> int:
     payload: dict[str, object] = {}
     csv_text: dict[str, str] = {}
     all_warnings: list[str] = []
+    feed_warnings: list[str] = []
 
     print(f"Sheet {SHEET_ID}")
     for tab, (key, required, optional) in TABS.items():
@@ -277,13 +297,20 @@ def main() -> int:
         note = f"  (no {', '.join(missing_optional)} column yet)" if missing_optional else ""
 
         if tab == "Articles" and FEEDS:
-            rows, feed_note = merge_feeds(rows, all_warnings)
+            rows, feed_note = merge_feeds(rows, feed_warnings)
             note = (note + feed_note) if feed_note else note
 
         payload[key] = rows
         csv_text[tab] = write_csv(DATA_DIR / f"{tab}.csv", rows, required + present)
         all_warnings += warn_blank_cells(tab, rows)
         print(f"  {tab:9} {len(rows):3} rows{note}")
+
+    if feed_warnings:
+        print("\nWARNING: a Featured Articles feed could not be read:")
+        print("\n".join(feed_warnings))
+        print("  That column falls back to the Sheet — and if the Sheet has no rows")
+        print("  for it either, the card is dropped from the page entirely.")
+        print("  Re-run the sync; Medium in particular fails intermittently.\n")
 
     if all_warnings:
         print("\nWARNING: empty cells that probably should have content:")

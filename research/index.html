@@ -566,6 +566,9 @@
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
         gap: clamp(16px, 2vw, 24px);
+        /* cards size to their content — stretching them to a common height
+           left the shortest column half empty */
+        align-items: start;
       }
       .card {
         background: var(--gy-white);
@@ -1026,7 +1029,7 @@
 }
 ],
 "_meta": {
-"generatedAt": "2026-09-24T04:19:46Z",
+"generatedAt": "2026-09-24T04:31:10Z",
 "sheetId": "1sk_HB3sJgYer0shLibe8MvNRmRmdPzWE48U_GxXmIxY"
 }
 }
