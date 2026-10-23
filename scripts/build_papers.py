@@ -83,9 +83,12 @@ def render_block(block, slug: str) -> str:
         return f"<ul>{items}</ul>"
     if kind == "fig":
         _, n, caption = block
+        # width/height reserve the figure's space so lazy loading can't shift
+        # the page under an in-progress scroll to a contents anchor
+        w, h = jpeg_size(RESEARCH / "papers" / slug / f"fig-{n}.jpg")
         return (
             f'<figure>'
-            f'<img src="papers/{slug}/fig-{n}.jpg" alt="{esc(caption)}" loading="lazy" />'
+            f'<img src="papers/{slug}/fig-{n}.jpg" width="{w}" height="{h}" alt="{esc(caption)}" loading="lazy" />'
             f"<figcaption>{rich(caption)}</figcaption>"
             f"</figure>"
         )
@@ -102,6 +105,28 @@ def render_refs(items) -> str:
         for n, i in enumerate(items, 1)
     )
     return f"<ol>{lis}</ol>"
+
+
+def jpeg_size(path: pathlib.Path) -> tuple[int, int]:
+    """(width, height) from the JPEG's SOF marker; no imaging dependency."""
+    data = path.read_bytes()
+    i = 2
+    while i < len(data):
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        length = int.from_bytes(data[i + 2 : i + 4], "big")
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            return (
+                int.from_bytes(data[i + 7 : i + 9], "big"),
+                int.from_bytes(data[i + 5 : i + 7], "big"),
+            )
+        i += 2 + length
+    raise ValueError(f"no JPEG dimensions in {path}")
 
 
 def render_section(sec, slug: str) -> str:
